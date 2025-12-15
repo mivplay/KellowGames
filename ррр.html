@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Minecraft Clone</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><path d="M9 0h2v9h9v2h-9v9H9v-9H0V9h9z" fill="white" stroke="black" stroke-width="0.5"/></svg>');
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 10;
+        }
+        #blocker {
+            position: absolute; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 20;
+        }
+        #instructions {
+            font-size: 24px; color: white; text-align: center; cursor: pointer;
+            background: rgba(0,0,0,0.7); padding: 30px; border: 2px solid white;
+        }
+        #ui {
+            position: absolute; bottom: 10px; left: 10px; color: white;
+            text-shadow: 1px 1px 0 #000; pointer-events: none;
+        }
+        .hotbar { display: flex; gap: 5px; margin-top: 5px; }
+        .slot {
+            width: 40px; height: 40px; border: 2px solid #555; background: rgba(0,0,0,0.5);
+            display: flex; justify-content: center; align-items: center; font-weight: bold;
+        }
+        .slot.active { border-color: white; transform: scale(1.1); }
+    </style>
+</head>
+<body>
+
+    <div id="crosshair"></div>
+    <div id="ui">
+        <div><b>WASD</b> Move | <b>SPACE</b> Jump | <b>L-Click</b> Break | <b>R-Click</b> Place | <b>1-4</b> Select Block</div>
+        <div class="hotbar" id="hotbar"></div>
+    </div>
+    <div id="blocker">
+        <div id="instructions">
+            <h1>MINECRAFT JS</h1>
+            <p>Click to Start</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+        import { PointerLockControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/PointerLockControls.js';
+
+        // --- 1. CONFIGURATION & STATE ---
+        const WORLD_SIZE = 30; // Radius of world generation
+        const CHUNK_HEIGHT = 16;
+        const PLAYER_HEIGHT = 1.7;
+        const PLAYER_RADIUS = 0.3;
+        const GRAVITY = 25.0;
+        const JUMP_FORCE = 9.0;
+        const SPEED = 6.0;
+
+        let camera, scene, renderer, controls;
+        let raycaster;
+        const objects = []; // For raycasting
+        const worldData = new Map(); // Stores block types: "x,y,z" -> type
+        const meshMap = new Map(); // Stores visual meshes: "x,y,z" -> THREE.Mesh
+        
+        // Physics State
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
+        let prevTime = performance.now();
+        
+        // Block Selection
+        const blockTypes = ['grass', 'dirt', 'stone', 'wood'];
+        let selectedBlock = 'grass';
+
+        // --- 2. PROCEDURAL TEXTURE GENERATION ---
+        function createTexture(type) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            
+            // Base Noise
+            const baseColor = type === 'grass' ? '#5BAC30' : 
+                              type === 'dirt' ? '#8B5A2B' : 
+                              type === 'stone' ? '#777777' : '#654321';
+            
+            ctx.fillStyle = baseColor;
+            ctx.fillRect(0,0,64,64);
+
+            // Add Noise
+            for(let i=0; i<400; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.15})`;
+                const x = Math.floor(Math.random() * 64);
+                const y = Math.floor(Math.random() * 64);
+                const w = Math.floor(Math.random() * 4 + 1);
+                const h = Math.floor(Math.random() * 4 + 1);
+                ctx.fillRect(x,y,w,h);
+                
+                ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.1})`;
+                ctx.fillRect(Math.floor(Math.random()*64), Math.floor(Math.random()*64), 2, 2);
+            }
+
+            // Specific Details
+            if (type === 'grass') {
+                ctx.fillStyle = '#8B5A2B'; // Dirt specks on grass side logic handled by materials usually, but here simple
+                // We'll treat this texture as "side" mostly or top. 
+                // Let's overlay some greener patches
+                for(let i=0; i<20; i++) {
+                    ctx.fillStyle = `rgba(50, 200, 50, 0.1)`;
+                    ctx.fillRect(Math.random()*64, Math.random()*64, 4, 4);
+                }
+            } else if (type === 'wood') {
+                // Vertical streaks
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                for(let i=0; i<8; i++) {
+                    ctx.fillRect(i*8, 0, 2, 64);
+                }
+            } else if (type === 'stone') {
+                // Cracks
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.moveTo(10,10); ctx.lineTo(20,20);
+                ctx.moveTo(40,50); ctx.lineTo(50,40);
+                ctx.stroke();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter; // Pixelated look
+            return tex;
+        }
+
+        const textures = {
+            grass: createTexture('grass'),
+            dirt: createTexture('dirt'),
+            stone: createTexture('stone'),
+            wood: createTexture('wood')
+        };
+        
+        // Materials
+        const materials = {
+            grass: new THREE.MeshLambertMaterial({ map: textures.grass }),
+            dirt: new THREE.MeshLambertMaterial({ map: textures.dirt }),
+            stone: new THREE.MeshLambertMaterial({ map: textures.stone }),
+            wood: new THREE.MeshLambertMaterial({ map: textures.wood }),
+            // Special case for grass block to have dirt sides (Simplified: we use one texture for now for performance/simplicity in single file)
+        };
+        // Fix grass side to look like dirt for realism
+        const dirtMat = materials.dirt;
+        const grassTopMat = materials.grass;
+        const grassBlockMaterials = [dirtMat, dirtMat, grassTopMat, dirtMat, dirtMat, dirtMat];
+
+        // --- 3. NOISE FUNCTION (Simple Perlin Implementation) ---
+        // Simplified noise for terrain generation
+        const SimpleNoise = (function() {
+            const p = new Uint8Array(512);
+            const permutation = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180];
+            for (let i=0; i < 256 ; i++) p[256+i] = p[i] = permutation[i];
+            
+            function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+            function lerp(t, a, b) { return a + t * (b - a); }
+            function grad(hash, x, y, z) {
+                const h = hash & 15;
+                const u = h<8 ? x : y, v = h<4 ? y : h==12||h==14 ? x : z;
+                return ((h&1) == 0 ? u : -u) + ((h&2) == 0 ? v : -v);
+            }
+
+            return {
+                noise: function (x, y, z) {
+                    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+                    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+                    const u = fade(x), v = fade(y), w = fade(z);
+                    const A = p[X]+Y, AA = p[A]+Z, AB = p[A+1]+Z, B = p[X+1]+Y, BA = p[B]+Z, BB = p[B+1]+Z;
+                    return lerp(w, lerp(v, lerp(u, grad(p[AA], x, y, z), grad(p[BA], x-1, y, z)),
+                                   lerp(u, grad(p[AB], x, y-1, z), grad(p[BB], x-1, y-1, z))),
+                           lerp(v, lerp(u, grad(p[AA+1], x, y, z-1), grad(p[BA+1], x-1, y, z-1)),
+                                   lerp(u, grad(p[AB+1], x, y-1, z-1), grad(p[BB+1], x-1, y-1, z-1))));
+                }
+            };
+        })();
+
+        // --- 4. WORLD GENERATION ---
+        function generateWorld() {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            
+            // Generate Data
+            for (let x = -WORLD_SIZE; x < WORLD_SIZE; x++) {
+                for (let z = -WORLD_SIZE; z < WORLD_SIZE; z++) {
+                    // Noise for height
+                    const n = SimpleNoise.noise(x * 0.05, 0, z * 0.05);
+                    const h = Math.floor((n + 1) * 5) + 2; // Height 2 to 12
+
+                    // Fill blocks down to 0
+                    for (let y = 0; y <= h; y++) {
+                        let type = 'stone';
+                        if (y === h) type = 'grass';
+                        else if (y > h - 3) type = 'dirt';
+                        if (y === 0) type = 'stone'; // Bedrock-ish
+
+                        setBlock(x, y, z, type, false); // Don't render yet
+                    }
+                }
+            }
+            // Add a few trees
+            for(let i=0; i<15; i++) {
+                let x = Math.floor((Math.random() * WORLD_SIZE * 2) - WORLD_SIZE);
+                let z = Math.floor((Math.random() * WORLD_SIZE * 2) - WORLD_SIZE);
+                // Find height
+                let y = 30;
+                while(y > 0 && !getBlock(x,y,z)) y--;
+                
+                if (getBlock(x,y,z) === 'grass') {
+                    // Trunk
+                    for(let k=1; k<=4; k++) setBlock(x, y+k, z, 'wood', false);
+                    // Leaves (using grass texture for simplicity)
+                    for(let lx=-1; lx<=1; lx++) {
+                        for(let lz=-1; lz<=1; lz++) {
+                            setBlock(x+lx, y+4, z+lz, 'grass', false);
+                            setBlock(x+lx, y+5, z+lz, 'grass', false);
+                        }
+                    }
+                    setBlock(x, y+6, z, 'grass', false);
+                }
+            }
+
+            // Initial Render
+            renderWorld();
+        }
+
+        function getBlock(x, y, z) {
+            return worldData.get(`${x},${y},${z}`);
+        }
+
+        function setBlock(x, y, z, type, updateRender = true) {
+            const key = `${x},${y},${z}`;
+            if (type === null) {
+                worldData.delete(key);
+            } else {
+                worldData.set(key, type);
+            }
+            if (updateRender) updateBlockMesh(x, y, z);
+        }
+
+        // Optimization: Only create mesh if block is visible (has air neighbor)
+        function updateBlockMesh(x, y, z) {
+            const key = `${x},${y},${z}`;
+            const type = worldData.get(key);
+            
+            // Remove existing mesh if any
+            if (meshMap.has(key)) {
+                const mesh = meshMap.get(key);
+                scene.remove(mesh);
+                objects.splice(objects.indexOf(mesh), 1);
+                meshMap.delete(key);
+            }
+
+            if (!type) return; // Block removed
+
+            // Check neighbors
+            const neighbors = [
+                [x+1, y, z], [x-1, y, z],
+                [x, y+1, z], [x, y-1, z],
+                [x, y, z+1], [x, y, z-1]
+            ];
+            
+            let isVisible = false;
+            for (let n of neighbors) {
+                if (!worldData.has(`${n[0]},${n[1]},${n[2]}`)) {
+                    isVisible = true;
+                    break;
+                }
+            }
+
+            if (isVisible) {
+                let mat = materials[type];
+                if (type === 'grass') mat = grassBlockMaterials;
+                
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat);
+                mesh.position.set(x, y, z);
+                // Better shadow performance
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                
+                scene.add(mesh);
+                meshMap.set(key, mesh);
+                objects.push(mesh);
+            }
+        }
+
+        function renderWorld() {
+            // Iterate all data and decide to render
+            // Warning: Full re-render is heavy, usually we update incrementally.
+            // For startup, we iterate all.
+            for (let [key, type] of worldData) {
+                const [x, y, z] = key.split(',').map(Number);
+                updateBlockMesh(x,y,z);
+            }
+        }
+
+        // --- 5. SETUP SCENE ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 40);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 10, 10);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -50;
+            dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50;
+            dirLight.shadow.camera.bottom = -50;
+            scene.add(dirLight);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: false }); // False for blocky style
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new PointerLockControls(camera, document.body);
+            
+            const blocker = document.getElementById('blocker');
+            const instructions = document.getElementById('instructions');
+
+            instructions.addEventListener('click', () => controls.lock());
+            controls.addEventListener('lock', () => blocker.style.display = 'none');
+            controls.addEventListener('unlock', () => blocker.style.display = 'flex');
+
+            scene.add(controls.getObject());
+
+            // Raycaster
+            raycaster = new THREE.Raycaster();
+            raycaster.far = 8; // Reach distance
+
+            // Inputs
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseClick);
+            window.addEventListener('resize', onWindowResize);
+
+            // Generate
+            generateWorld();
+            initUI();
+            
+            animate();
+        }
+
+        function initUI() {
+            const hotbar = document.getElementById('hotbar');
+            blockTypes.forEach((type, index) => {
+                const el = document.createElement('div');
+                el.className = `slot ${type === selectedBlock ? 'active' : ''}`;
+                el.innerText = index + 1;
+                el.style.backgroundColor = type === 'grass' ? '#5BAC30' : 
+                                         type === 'dirt' ? '#8B5A2B' : 
+                                         type === 'stone' ? '#777' : '#654321';
+                hotbar.appendChild(el);
+            });
+        }
+
+        function updateUI() {
+            const slots = document.querySelectorAll('.slot');
+            slots.forEach((s, i) => {
+                if (blockTypes[i] === selectedBlock) s.classList.add('active');
+                else s.classList.remove('active');
+            });
+        }
+
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'Space': 
+                    if (canJump) { velocity.y += JUMP_FORCE; canJump = false; }
+                    break;
+                case 'Digit1': selectedBlock = blockTypes[0]; updateUI(); break;
+                case 'Digit2': selectedBlock = blockTypes[1]; updateUI(); break;
+                case 'Digit3': selectedBlock = blockTypes[2]; updateUI(); break;
+                case 'Digit4': selectedBlock = blockTypes[3]; updateUI(); break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        }
+
+        function onMouseClick(event) {
+            if (!controls.isLocked) return;
+            
+            // Raycast from center
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(objects);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                const pos = intersect.object.position;
+
+                if (event.button === 0) { // Left Click: Break
+                    setBlock(pos.x, pos.y, pos.z, null);
+                    // Update neighbors to reveal hidden faces
+                    updateBlockMesh(pos.x+1, pos.y, pos.z);
+                    updateBlockMesh(pos.x-1, pos.y, pos.z);
+                    updateBlockMesh(pos.x, pos.y+1, pos.z);
+                    updateBlockMesh(pos.x, pos.y-1, pos.z);
+                    updateBlockMesh(pos.x, pos.y, pos.z+1);
+                    updateBlockMesh(pos.x, pos.y, pos.z-1);
+                } 
+                else if (event.button === 2) { // Right Click: Place
+                    const normal = intersect.face.normal;
+                    const bx = pos.x + normal.x;
+                    const by = pos.y + normal.y;
+                    const bz = pos.z + normal.z;
+
+                    // Prevent placing inside player
+                    const playerPos = controls.getObject().position;
+                    // Simple distance check isn't enough for AABB, check bounds
+                    if (Math.abs(playerPos.x - bx) < 0.6 && Math.abs(playerPos.z - bz) < 0.6 && (playerPos.y - PLAYER_HEIGHT < by + 0.5 && playerPos.y > by - 0.5)) {
+                        return; // Occupied by player
+                    }
+
+                    setBlock(bx, by, bz, selectedBlock);
+                }
+            }
+        }
+
+        // --- 6. PHYSICS SYSTEM ---
+        function checkCollision(pos) {
+            // Check surrounding integer coordinates for blocks
+            // Player AABB is approx: x +/- 0.3, z +/- 0.3, y - 1.7 to y
+            
+            const minX = Math.floor(pos.x - PLAYER_RADIUS);
+            const maxX = Math.floor(pos.x + PLAYER_RADIUS);
+            const minZ = Math.floor(pos.z - PLAYER_RADIUS);
+            const maxZ = Math.floor(pos.z + PLAYER_RADIUS);
+            const minY = Math.floor(pos.y - PLAYER_HEIGHT);
+            const maxY = Math.floor(pos.y);
+
+            for(let x = minX; x <= maxX; x++) {
+                for(let z = minZ; z <= maxZ; z++) {
+                    for(let y = minY; y <= maxY; y++) {
+                        if (getBlock(x,y,z)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+            prevTime = time;
+
+            if (controls.isLocked) {
+                // Decay velocity
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= GRAVITY * delta; // Gravity
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
+
+                if (moveForward || moveBackward) velocity.z -= direction.z * SPEED * delta * 10; // * 10 to counteract damping
+                if (moveLeft || moveRight) velocity.x -= direction.x * SPEED * delta * 10;
+
+                // --- Physics Step ---
+                // We move Axis by Axis to allow sliding
+                
+                const controlObj = controls.getObject();
+                const pos = controlObj.position.clone();
+                
+                // Get Camera Local Directions projected to Flattened Plane (XZ)
+                // This ensures "Forward" is always ground-forward, not fly-forward
+                const camDir = new THREE.Vector3();
+                controlObj.getWorldDirection(camDir);
+                camDir.y = 0; 
+                camDir.normalize();
+                
+                const camRight = new THREE.Vector3();
+                camRight.crossVectors(controlObj.up, camDir).normalize(); // Note: Threejs cross order might imply reversing if standard Right-Hand
+                // Actually easier: use Z axis logic relative to camera yaw
+                
+                // Calculate Move Vector based on input and camera angle
+                // move vector relative to world
+                const moveVec = new THREE.Vector3();
+                // Forward/Back
+                moveVec.add(camDir.clone().multiplyScalar(-velocity.z * delta)); // Velocity z is negative for forward in standard mapping? 
+                // Wait, let's simplify:
+                // velocity.z holds local forward/back speed.
+                // velocity.x holds local left/right speed.
+                
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controlObj.quaternion);
+                forward.y = 0; forward.normalize();
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(controlObj.quaternion);
+                right.y = 0; right.normalize();
+
+                // Intended movement
+                const dx = (right.x * velocity.x + forward.x * velocity.z) * delta;
+                const dz = (right.z * velocity.x + forward.z * velocity.z) * delta;
+                const dy = velocity.y * delta;
+
+                // X Movement
+                controlObj.position.x += dx;
+                if (checkCollision(controlObj.position)) {
+                    controlObj.position.x -= dx;
+                    velocity.x = 0;
+                }
+
+                // Z Movement
+                controlObj.position.z += dz;
+                if (checkCollision(controlObj.position)) {
+                    controlObj.position.z -= dz;
+                    velocity.z = 0;
+                }
+
+                // Y Movement
+                controlObj.position.y += dy;
+                if (checkCollision(controlObj.position)) {
+                    controlObj.position.y -= dy;
+                    if (velocity.y < 0) canJump = true; // Landed
+                    velocity.y = 0;
+                }
+                
+                if (controlObj.position.y < -30) {
+                    controlObj.position.set(0, 20, 0); // Reset if fell out of world
+                    velocity.set(0,0,0);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+
+    </script>
+</body>
+</html>

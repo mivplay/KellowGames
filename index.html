@@ -1,0 +1,382 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KellowGames</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="Logo.png" type="image/x-icon">	
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(#aced95, #17a541);jm,
+            color: #1a1a1a;
+            min-height: 200vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 0;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 3.5rem;
+            color: #28a745;
+            text-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);
+            margin-bottom: 10px;
+            font-weight: 800;
+        }
+
+        header p {
+            font-size: 1.2rem;
+            color: #6c757d;
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        .games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            padding: 20px 0;
+        }
+
+        .game-card {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(40, 167, 69, 0.15);
+            border: 2px solid #28a745;
+            position: relative;
+        }
+
+        .game-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 35px rgba(40, 167, 69, 0.25);
+        }
+
+        .game-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #28a745, #20c997, #17a2b8);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.3s ease;
+        }
+
+        .game-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .game-image {
+            height: 200px;
+            width: 100%;
+            background-size: cover;
+            background-position: center;
+            position: relative;
+        }
+
+        .game-image::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50%;
+            background: linear-gradient(to top, rgba(0,0,0,0.3), transparent);
+        }
+
+        .game-info {
+            padding: 20px;
+        }
+
+        .game-title {
+            font-size: 1.4rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            color: #212529;
+        }
+
+        .game-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .game-genre {
+            background: #e8f5e9;
+            color: #28a745;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            border: 1px solid #c3e6cb;
+        }
+
+        .game-description {
+            color: #495057;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            margin-bottom: 20px;
+            min-height: 60px;
+        }
+
+        .game-stats {
+            display: flex;
+            justify-content: space-between;
+            border-top: 2px solid #e9ecef;
+            padding-top: 15px;
+        }
+
+        .stat {
+            text-align: center;
+            flex: 1;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 800;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            font-weight: 600;
+        }
+
+        .rating .stat-value {
+            color: #28a745;
+        }
+
+        .players .stat-value {
+            color: #20c997;
+        }
+
+        .price .stat-value {
+            color: #17a2b8;
+        }
+
+        .platforms {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .platform {
+            background: #e8f5e9;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #28a745;
+            border: 1px solid #c3e6cb;
+            font-weight: 600;
+        }
+
+        .btn-play {
+            display: block;
+            width: 100%;
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 1rem;
+            margin-top: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            text-decoration: none;
+        }
+
+        .btn-play:hover {
+            background: linear-gradient(135deg, #218838, #1e9d8c);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2.5rem;
+            }
+            
+            .games-grid {
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+            }
+            
+            .game-stats {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .btn-play {
+                padding: 10px;
+                font-size: 0.9rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            header h1 {
+                font-size: 2rem;
+            }
+            
+            header {
+                padding: 30px 0;
+            }
+            
+            .game-description {
+                font-size: 0.9rem;
+            }
+            
+            .game-title {
+                font-size: 1.2rem;
+            }
+        }
+
+        /* Акцентные элементы */
+        .accent-circle {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #28a745;
+            border-radius: 50%;
+            opacity: 0.2;
+            z-index: 0;
+        }
+
+        .games-grid {
+            position: relative;
+        }
+
+        .games-grid::before {
+            content: '';
+            position: absolute;
+            top: -50px;
+            right: -50px;
+            width: 100px;
+            height: 100px;
+            background: #28a745;
+            border-radius: 50%;
+            opacity: 0.1;
+        }
+
+        .games-grid::after {
+            content: '';
+            position: absolute;
+            bottom: -80px;
+            left: -30px;
+            width: 150px;
+            height: 150px;
+            background: #20c997;
+            border-radius: 50%;
+            opacity: 0.08;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>KellowGames</h1>
+            <p>Откройте мир захватывающих компьютерных игр. Новые релизы, популярные хиты и эксклюзивный контент.</p>
+        </header>
+
+        <div class="games-grid">
+            <!-- Игра 1 -->
+            <div class="game-card">
+                <div class="game-image"> <img src="red1.png" class="logoimg"></div>
+                <div class="game-info">
+                    <h3 class="game-title">Red_Cube</h3>
+                    <div class="game-meta">
+                        <span class="game-genre">Adventure</span>
+                    </div>
+                    <p class="game-description">Проходите множество уровней, побеждайте врагов, сражайтесь с могущественными боссами и многое другое!</p>
+                    <div class="platforms">
+                        <span class="platform">PC</span>
+                    </div>
+
+                    <a href="red_cube.html" class="btn-play">Играть сейчас</a>
+                </div>
+            </div>
+
+            <!-- Игра 2 -->
+            <div class="game-card">
+                <div class="game-image"><img src="ЭкоМир2.png" class="logoimg"></div>
+                <div class="game-info">
+                    <h3 class="game-title">ЭкоМир</h3>
+                    <div class="game-meta">
+                        <span class="game-genre">Мусорный герой</span>
+                    </div>
+                    <p class="game-description">Спасите мир и очистите планету от мусора!</p>
+                    <div class="platforms">
+                        <span class="platform">PC</span>
+                    </div>
+
+                    <a href="ecoworld.html" class="btn-play">Играть сейчас</a>
+                </div>
+            </div>
+
+            <!-- Игра 3 -->
+            <div class="game-card">
+                <div class="game-image"><img src="BreakCube.png" class="logoimg"></div>
+                <div class="game-info">
+                    <h3 class="game-title">BreakCube</h3>
+                    <div class="game-meta">
+                        <span class="game-genre">Sandbox</span>
+                    </div>
+                    <p class="game-description">Бесконечный мир креатива в блочном стиле. Создавай всё, что угодно, в мире со случайной генерацией!</p>
+                    <div class="platforms">
+                        <span class="platform">PC</span>
+
+                    </div>
+
+                    <a href="BreakCube.html" class="btn-play">Играть сейчас!</a>
+                </div>
+            </div>
+
+            <!-- Игра 4 -->
+            <div class="game-card">
+                <div class="game-image"></div>
+                <div class="game-info">
+                    <h3 class="game-title">???</h3>
+                    <div class="game-meta">
+                        <span class="game-genre">Скоро</span>
+                    </div>
+                    <p class="game-description">Скоро выйдет! Следите за новостями.</p>
+                    <div class="platforms">
+                        <span class="platform">PC</span>
+                    </div>
+                    <div class="game-stats">
+                        <div class="stat players">
+                            <div class="stat-value">25</div>
+                            <div class="stat-label">Декабря</div>
+                        </div>
+                    </div>
+                    <a href="ррр.html" class="btn-play">Скоро</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
