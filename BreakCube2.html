@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>BreakCube2</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        canvas { display: block; image-rendering: pixelated; }
+        #ui-layer { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+        #menu, #game-over { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); pointer-events: auto; z-index: 100; }
+        .btn { width: 250px; padding: 15px; margin: 10px; background: #5a5a5a; color: #fff; border: 3px solid #000; cursor: pointer; text-align: center; font-weight: bold; font-size: 18px; }
+        .btn:hover { background: #7a7a7a; border-color: #fff; }
+        #stats-container { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); width: 420px; display: flex; justify-content: space-between; }
+        .stat-bar { display: flex; gap: 3px; }
+        .heart, .food { width: 18px; height: 18px; background-size: contain; }
+        .heart { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="red"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>'); }
+        .food { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23e67e22"><path d="M11,5C10.12,5 9.25,5.3 8.53,5.9C7.1,7.1 6.5,8.93 7,10.73L7.45,12.39L6.11,13.23C5.42,13.66 5,14.41 5,15.22C5,16.5 6,17.5 7.27,17.5C7.55,17.5 7.83,17.44 8.09,17.33L9.5,16.75L10.08,18.16C10.5,19.14 11.41,19.78 12.45,19.96C12.15,18.66 12.35,17.29 13.04,16.14C14.19,14.23 16.29,13.1 18.41,13.1C18.43,11.5 17.89,10 16.81,8.92C15.39,7.5 13.2,7.12 11.41,7.79L9.77,8.4L9.17,6.76C8.8,5.75 7.9,5.08 6.89,5H11V5"/></svg>'); }
+        .empty { filter: grayscale(1) brightness(0.4); }
+        #hotbar-wrap { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 5px; border: 3px solid #333; display: flex; gap: 4px; pointer-events: auto; }
+        .slot { width: 44px; height: 44px; background: #8b8b8b; border: 3px solid #444; position: relative; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+        .slot.active { border-color: #fff; }
+        .slot img { width: 32px; height: 32px; image-rendering: pixelated; }
+        .count { position: absolute; bottom: 2px; right: 4px; color: #fff; font-size: 12px; font-weight: bold; text-shadow: 1px 1px #000; }
+        #inv-window { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #c6c6c6; border: 4px solid #333; padding: 20px; display: none; pointer-events: auto; z-index: 50; }
+        .grid { display: grid; gap: 4px; }
+        #drag-icon { position: fixed; pointer-events: none; z-index: 1000; display: none; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+<div id="ui-layer">
+    <div id="menu">
+        <h1 style="color:white; text-shadow: 4px 4px #000; font-size: 48px;">BreakCube2</h1>
+        <div class="btn" id="btn-creative">ТВОРЧЕСТВО</div>
+        <div class="btn" id="btn-survival">ВЫЖИВАНИЕ</div>
+    </div>
+    
+    <div id="game-over" style="display:none;">
+        <h1 style="color:red;">ВЫ УМЕРЛИ</h1>
+        <div class="btn" onclick="location.reload()">В МЕНЮ</div>
+    </div>
+
+    <div id="stats-container" style="display:none;">
+        <div id="hp-bar" class="stat-bar"></div>
+        <div id="hunger-bar" class="stat-bar"></div>
+    </div>
+
+    <div id="hotbar-wrap" style="display:none;">
+        <div id="hotbar-slots" style="display:flex; gap:4px;"></div>
+        <div class="btn" style="width: 44px; height: 44px; padding:0; margin:0; line-height:44px;" onclick="toggleInv()">...</div>
+    </div>
+
+    <div id="inv-window">
+        <div style="display:flex; align-items:center; margin-bottom:20px; justify-content: center;">
+            <div id="craft-grid" class="grid" style="grid-template-columns: repeat(3, 44px);"></div>
+            <div style="font-size:30px; margin: 0 15px; color: #444;">➔</div>
+            <div id="craft-res" class="slot" style="cursor:pointer;"></div>
+        </div>
+        <div id="full-inv" class="grid" style="grid-template-columns: repeat(10, 44px);"></div>
+    </div>
+</div>
+
+<div id="drag-icon">
+    <img id="drag-img" style="width:32px; height:32px;">
+    <div id="drag-count" style="position: absolute; bottom: -5px; right: -5px; color: white; text-shadow: 1px 1px #000; font-weight:bold; font-size: 14px;"></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let world = [], enemies = [], lightMap = [], particles = [];
+let gameRunning = false, gameMode = 'survival', isInvOpen = false;
+let player = { x:3200, y:0, w:20, h:42, vx:0, vy:0, g:false, hp:10, hunger:10, hungerTick:0, dir:1, dmgCd:0, sel:0, attackAnim: 0 };
+let cam = { x:0, y:0 }, keys = {}, frameCount = 0;
+let inv = Array.from({length: 30}, () => ({id: 0, count: 0}));
+let craft = Array.from({length: 9}, () => ({id: 0, count: 0})), resSlot = {id:0, count:0}, dragData = null;
+let isMining = false, miningT = null, miningP = 0;
+const textures = {}, crackTextures = [];
+
+function genTex() {
+    const t = (c, draw) => {
+        const cv = document.createElement('canvas'); cv.width=cv.height=32;
+        const x = cv.getContext('2d'); x.fillStyle=c; x.fillRect(0,0,32,32);
+        draw(x); return cv;
+    };
+    textures[1] = t('#5d3a1a', x=>{ x.fillStyle='#55aa55'; x.fillRect(0,0,32,10); }); 
+    textures[2] = t('#8b4513', x=>{ x.fillStyle='#6d360e'; for(let i=0;i<10;i++) x.fillRect(Math.random()*32,Math.random()*32,2,2); });
+    textures[3] = t('#7f8c8d', x=>{ x.fillStyle='#95a5a6'; x.fillRect(2,2,28,28); }); 
+    textures[4] = t('#5d3a1a', x=>{ x.fillStyle='#4a2d13'; x.fillRect(10,0,12,32); }); 
+    textures[5] = t('#1e5d2f', x=>{ x.fillStyle='#2ecc71'; for(let i=0;i<12;i++) x.fillRect(Math.random()*24,Math.random()*24,6,6); }); 
+    textures[6] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#8b4513'; x.fillRect(14,14,4,18); x.fillStyle='#ffcc00'; x.fillRect(10,4,12,10); }); 
+    textures[7] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#e74c3c'; x.beginPath(); x.arc(16,18,8,0,7); x.fill(); x.fillStyle='#27ae60'; x.fillRect(15,4,2,6); }); 
+    textures[8] = t('#a57041', x=>{ x.fillStyle='#5d3a1a'; x.fillRect(0,10,32,2); x.fillRect(0,22,32,2); }); 
+    textures[9] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#5d3a1a'; x.fillRect(14,4,4,24); }); 
+    textures[10] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#d2b48c'; x.fillRect(13,2,6,20); x.fillStyle='#8b4513'; x.fillRect(9,22,14,4); x.fillStyle='#5d3a1a'; x.fillRect(14,26,4,6); }); 
+    textures[11] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#95a5a6'; x.fillRect(13,2,6,20); x.fillStyle='#7f8c8d'; x.fillRect(9,22,14,4); x.fillStyle='#5d3a1a'; x.fillRect(14,26,4,6); }); 
+    textures[12] = t('rgba(0,0,0,0)', x=>{ x.fillStyle='#5d3a1a'; x.fillRect(14,10,4,20); x.fillStyle='#a57041'; x.fillRect(4,4,24,6); x.fillRect(4,10,4,4); x.fillRect(24,10,4,4); }); 
+
+    for(let i=1; i<=10; i++) {
+        const cv = document.createElement('canvas'); cv.width=cv.height=32;
+        const x = cv.getContext('2d'); x.strokeStyle='rgba(0,0,0,0.7)'; x.lineWidth=2;
+        for(let j=0; j<i; j++) { x.beginPath(); x.moveTo(Math.random()*32, Math.random()*32); x.lineTo(Math.random()*32, Math.random()*32); x.stroke(); }
+        crackTextures[i] = cv;
+    }
+}
+
+// ... (Функции движения, коллизий и света без изменений) ...
+function updateLight() { lightMap = Array.from({length: 60}, () => new Array(200).fill(1.0)); for (let x=0; x<200; x++) { let sky = 1.0; for (let y=0; y<60; y++) { if (world[y] && world[y][x] !== 0 && ![5,6,7].includes(world[y][x])) sky *= 0.8; lightMap[y][x] = sky; } } }
+function move(e) { let nx = e.x + e.vx; if(!coll(nx, e.y, e.w, e.h)) e.x = nx; let ny = e.y + e.vy; if(!coll(e.x, ny, e.w, e.h)) { e.y = ny; e.g = false; } else { if(e.vy > 0) e.g = true; e.vy = 0; } }
+function coll(x,y,w,h) { for(let r=Math.floor(y/32); r<=Math.floor((y+h)/32); r++) for(let c=Math.floor(x/32); c<=Math.floor((x+w)/32); c++) if(world[r] && world[r][c] && ![6,7].includes(world[r][c])) return true; return false; }
+
+function loop() {
+    if(!gameRunning) return;
+    frameCount++;
+    if(player.dmgCd > 0) player.dmgCd--;
+    if(gameMode === 'survival') {
+        let exertion = 0.1;
+        if(Math.abs(player.vx) > 0.1) exertion += 0.5;
+        if(!player.g && player.vy < 0) exertion += 2.5;
+        player.hungerTick += exertion;
+        if(player.hungerTick >= 2500) {
+            if(player.hunger > 0) player.hunger--;
+            else if(player.hp > 0) player.hp--; 
+            player.hungerTick = 0; updateStats();
+        }
+        if(frameCount % 800 === 0 && player.hunger >= 10 && player.hp < 10) {
+            player.hp++; player.hungerTick += 500; updateStats();
+        }
+    }
+    if(!isInvOpen) {
+        player.vx = (keys['KeyD']?4:0) - (keys['KeyA']?4:0);
+        player.vy += 0.5;
+        if(keys['KeyW'] && player.g) { player.vy = -9; player.g = false; }
+        move(player);
+        enemies.forEach(en => { en.vx = Math.sign(player.x - en.x) * 1.5; en.vy += 0.5; move(en); if(Math.abs(player.x-en.x)<20 && Math.abs(player.y-en.y)<30 && player.dmgCd<=0 && gameMode==='survival'){ player.hp--; player.dmgCd=60; updateStats(); } });
+        if(isMining && miningT) {
+            let h = (world[miningT.y][miningT.x] === 3) ? (inv[player.sel].id === 12 ? 40 : 250) : 30;
+            miningP++; if(miningP >= h) { breakBlock(miningT.x, miningT.y); isMining = false; miningT = null; }
+        }
+    }
+    ctx.fillStyle = '#87CEEB'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.save(); ctx.translate(-Math.floor(cam.x), -Math.floor(cam.y));
+    let sX = Math.max(0, Math.floor(cam.x/32)), eX = Math.min(199, Math.floor((cam.x+canvas.width)/32)+1);
+    for(let y=0; y<60; y++) {
+        for(let x=sX; x<=eX; x++) { if(world[y] && world[y][x]) { ctx.drawImage(textures[world[y][x]], x*32, y*32); if(isMining && miningT?.x === x && miningT?.y === y) { let h = (world[y][x] === 3) ? (inv[player.sel].id === 12 ? 40 : 250) : 30; let idx = Math.floor((miningP/h)*10); if(crackTextures[idx]) ctx.drawImage(crackTextures[idx], x*32, y*32); } ctx.fillStyle = 'black'; ctx.globalAlpha = 1 - (lightMap[y][x] || 0.1); ctx.fillRect(x*32, y*32, 32, 32); ctx.globalAlpha = 1; } }
+    }
+    particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.life--; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3); if(p.life <= 0) particles.splice(i, 1); });
+    drawPlayer(); enemies.forEach(en => drawZombie(en));
+    ctx.restore(); 
+    cam.x += (player.x - cam.x - canvas.width/2) * 0.1; cam.y += (player.y - cam.y - canvas.height/2) * 0.1;
+    if(player.hp <= 0 && gameMode === 'survival') { gameRunning = false; document.getElementById('game-over').style.display='flex'; }
+    requestAnimationFrame(loop);
+}
+
+// --- НОВАЯ ЛОГИКА КРАФТА ---
+function checkCraft() {
+    resSlot = {id:0, count:0}; 
+    const g = craft.map(c => c.id);
+
+    const isPickaxe = (mat) => g[0]===mat && g[1]===mat && g[2]===mat && g[4]===9 && g[7]===9;
+
+    if (isPickaxe(8)) resSlot = {id: 10, count: 1}; // Дерево
+    else if (isPickaxe(3)) resSlot = {id: 12, count: 1}; // Камень
+    else if (g.filter(i=>i>0).length === 1 && g.includes(4)) resSlot = {id: 8, count: 4}; // Доски
+    else if (g.filter(i=>i>0).length === 1 && g.includes(8)) resSlot = {id: 9, count: 4}; // Палки
+    else if (g[0]===8 && g[3]===8 && g[1]===8 && g[4]===8) resSlot = {id: 6, count: 1}; // Верстак (условно)
+}
+
+function finalizeCraft() {
+    if(!resSlot.id || dragData) return;
+    dragData = { ...resSlot };
+    craft.forEach(c => { if(c.id) { c.count--; if(c.count<=0) c.id=0; } });
+    updateDragIcon(); renderUI();
+}
+
+function breakBlock(x, y) {
+    let id = world[y][x]; world[y][x] = 0;
+    if(gameMode === 'survival') {
+        let s = inv.find(i => i.id === id && i.count < 64) || inv.find(i => i.id === 0);
+        if(s) { if(s.id === 0) { s.id = id; s.count = 1; } else s.count++; }
+    }
+    updateLight(); renderUI();
+}
+
+// ... (Остальные функции UI и управления без изменений) ...
+function createSlot(item, idx, type, active) { const s = document.createElement('div'); s.className = 'slot' + (active?' active':''); if(item && item.id) s.innerHTML = `<img src="${textures[item.id].toDataURL()}">${item.count>1?`<div class="count">${item.count}</div>`:''}`; s.onmousedown = (e) => handleSlotClick(e, item, idx, type); return s; }
+function renderUI() { const hs = document.getElementById('hotbar-slots'); hs.innerHTML = ''; for(let i=0; i<10; i++) hs.appendChild(createSlot(inv[i], i, 'inv', i === player.sel)); const fi = document.getElementById('full-inv'); fi.innerHTML = ''; for(let i=0; i<30; i++) fi.appendChild(createSlot(inv[i], i, 'inv')); const cg = document.getElementById('craft-grid'); cg.innerHTML = ''; for(let i=0; i<9; i++) cg.appendChild(createSlot(craft[i], i, 'craft')); checkCraft(); document.getElementById('craft-res').innerHTML = resSlot.id ? `<img src="${textures[resSlot.id].toDataURL()}">` : ''; }
+function toggleInv() { isInvOpen = !isInvOpen; document.getElementById('inv-window').style.display = isInvOpen ? 'block' : 'none'; renderUI(); }
+function updateStats() { const hb = document.getElementById('hp-bar'), nb = document.getElementById('hunger-bar'); hb.innerHTML = ''; nb.innerHTML = ''; for(let i=0; i<10; i++) { hb.innerHTML += `<div class="heart ${i >= player.hp ? 'empty' : ''}"></div>`; nb.innerHTML += `<div class="food ${i >= player.hunger ? 'empty' : ''}"></div>`; } }
+function handleSlotClick(e, item, idx, type) { e.preventDefault(); const isR = e.button === 2; const arr = type === 'inv' ? inv : craft; if (!dragData) { if (item.id === 0) return; if (isR) { let take = Math.ceil(item.count / 2); dragData = { id: item.id, count: take }; item.count -= take; if(item.count <= 0) item.id = 0; } else { dragData = { ...item }; arr[idx] = { id: 0, count: 0 }; } } else { if (isR) { if (item.id === 0) { arr[idx] = { id: dragData.id, count: 1 }; dragData.count--; } else if (item.id === dragData.id && item.count < 64) { arr[idx].count++; dragData.count--; } } else { if (item.id === 0) { arr[idx] = { ...dragData }; dragData = null; } else if (item.id === dragData.id) { let add = Math.min(64-item.count, dragData.count); arr[idx].count += add; dragData.count -= add; } else { let tmp = { ...item }; arr[idx] = { ...dragData }; dragData = tmp; } } } if (dragData && dragData.count <= 0) dragData = null; updateDragIcon(); renderUI(); }
+function updateDragIcon() { const di = document.getElementById('drag-icon'); if (dragData) { di.style.display = 'flex'; document.getElementById('drag-img').src = textures[dragData.id].toDataURL(); document.getElementById('drag-count').innerText = dragData.count > 1 ? dragData.count : ''; } else di.style.display = 'none'; }
+function drawPlayer() { ctx.fillStyle = '#3498db'; ctx.fillRect(player.x, player.y+16, 20, 26); ctx.fillStyle = '#ffccaa'; ctx.fillRect(player.x+2, player.y, 16, 16); }
+function drawZombie(en) { ctx.fillStyle = '#2ecc71'; ctx.fillRect(en.x, en.y+16, 20, 26); ctx.fillStyle = '#1e8449'; ctx.fillRect(en.x+2, en.y, 16, 16); }
+
+canvas.onmousedown = (e) => {
+    if(!gameRunning || isInvOpen) return;
+    let wX = e.clientX + cam.x, wY = e.clientY + cam.y;
+    let held = inv[player.sel];
+    let tx = Math.floor(wX/32), ty = Math.floor(wY/32);
+    let dist = Math.sqrt(Math.pow((player.x+10)-wX,2)+Math.pow((player.y+21)-wY,2));
+    if(e.button === 0) {
+        if(world[ty] && world[ty][tx]) { if(gameMode === 'creative' || dist < 120) { isMining = true; miningT = {x:tx, y:ty}; miningP = 0; } }
+    } else if(e.button === 2) {
+        if(held.id === 7 && gameMode === 'survival') {
+            if(player.hunger < 10 || (player.hp < 10 && player.hunger === 10)) { if(player.hunger < 10) player.hunger = Math.min(10, player.hunger + 2); else player.hp = Math.min(10, player.hp + 1); held.count--; if(held.count <= 0) held.id = 0; updateStats(); renderUI(); return; }
+        }
+        if((gameMode === 'creative' || dist < 120) && world[ty] && !world[ty][tx] && held.id > 0 && held.id <= 8) { world[ty][tx] = held.id; if(gameMode === 'survival') { held.count--; if(held.count <= 0) held.id = 0; } updateLight(); renderUI(); }
+    }
+};
+
+window.onmouseup = () => { isMining = false; miningT = null; };
+function startGame(m) { gameMode = m; genTex(); document.getElementById('menu').style.display = 'none'; document.getElementById('hotbar-wrap').style.display = 'flex'; document.getElementById('stats-container').style.display = m === 'survival' ? 'flex' : 'none'; world = Array.from({length: 60}, () => new Array(200).fill(0)); for(let x=0; x<200; x++) { let g = 30 + Math.floor(Math.sin(x*0.1)*5); for(let y=g; y<60; y++) world[y][x] = y===g?1:(y>g+4?3:2); if(x > 5 && x < 195 && Math.random() < 0.05) { let treeH = 4 + Math.floor(Math.random()*2); for(let h=0; h<treeH; h++) world[g-1-h][x] = 4; for(let ly=-2; ly<=0; ly++) { for(let lx=-2; lx<=2; lx++) { if(world[g-treeH+ly]) world[g-treeH+ly][x+lx] = 5; } } if(Math.random()<0.7) { let ay = g-treeH+1; let ax = x+(Math.random()>0.5?1:-1); if(world[ay]) world[ay][ax] = 7; } } if(x > 20 && Math.random() < 0.015) enemies.push({x:x*32, y:(g-2)*32, w:20, h:42, vx:0, vy:0, dir:1, hp:10, dmgCd:0}); } inv = m === 'creative' ? Array.from({length: 30}, (_, i) => ({id: i<12?i+1:0, count: 64})) : Array.from({length: 30}, () => ({id: 0, count: 0})); updateLight(); updateStats(); renderUI(); gameRunning = true; requestAnimationFrame(loop); }
+document.getElementById('btn-creative').onclick = () => startGame('creative');
+document.getElementById('btn-survival').onclick = () => startGame('survival');
+document.getElementById('craft-res').onclick = () => finalizeCraft();
+document.onmousemove = (e) => { if(dragData) { const di = document.getElementById('drag-icon'); di.style.left = e.clientX-16+'px'; di.style.top = e.clientY-16+'px'; } };
+window.onkeydown = (e) => { if(e.code==='KeyE') toggleInv(); if(e.key>='1'&&e.key<='9') {player.sel=parseInt(e.key)-1; renderUI(); } keys[e.code]=true; };
+window.onkeyup = (e) => keys[e.code]=false;
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+</script>
+</body>
+</html>
