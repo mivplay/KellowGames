@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Постапокалиптическое выживание</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; color: white; user-select: none; }
+        canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+        
+        /* Элементы интерфейса */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .panel { background: rgba(0, 0, 0, 0.7); border: 2px solid #555; padding: 10px; pointer-events: auto; }
+        
+        #stats { position: absolute; top: 10px; left: 10px; width: 200px; }
+        .stat-bar { height: 15px; background: #333; margin-bottom: 5px; position: relative; }
+        .stat-fill { height: 100%; width: 100%; transition: width 0.2s; }
+        #health-fill { background: #d32f2f; }
+        #hunger-fill { background: #fbc02d; }
+        #energy-fill { background: #1976d2; }
+        .stat-label { position: absolute; top: -2px; left: 5px; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 0 #000; }
+
+        #equip-slot { position: absolute; top: 105px; left: 10px; width: 200px; font-size: 14px; }
+        #equipped-weapon { font-weight: bold; color: #4caf50; }
+
+        #inventory-panel { position: absolute; top: 10px; right: 10px; width: 250px; max-height: 40vh; overflow-y: auto; }
+        #crafting-panel { position: absolute; top: 45vh; right: 10px; width: 250px; max-height: 40vh; overflow-y: auto; }
+        
+        #search-btn {
+            position: absolute; bottom: 20px; right: 20px; width: 60px; height: 60px;
+            background: rgba(50, 50, 50, 0.9); border: 3px solid #888; border-radius: 50%;
+            font-size: 30px; text-align: center; line-height: 55px; cursor: pointer; pointer-events: auto;
+            box-shadow: 0 0 10px #000;
+        }
+        #search-btn:hover { background: rgba(80, 80, 80, 0.9); transform: scale(1.05); }
+        #search-btn:active { transform: scale(0.95); }
+
+        .btn { background: #444; color: white; border: 1px solid #777; padding: 5px; width: 100%; margin-top: 5px; cursor: pointer; text-align: left; }
+        .btn:hover { background: #555; }
+        .btn:disabled { background: #222; color: #555; cursor: not-allowed; }
+        .btn-small { width: auto; font-size: 10px; float: right; padding: 2px 5px; margin-top: 0; }
+        
+        #message-log { position: absolute; bottom: 20px; left: 10px; width: 300px; height: 100px; overflow-y: hidden; display: flex; flex-direction: column; justify-content: flex-end;}
+        .log-entry { margin: 2px 0; font-size: 14px; text-shadow: 1px 1px 0 #000; opacity: 0; animation: fadeinout 4s forwards; }
+        
+        @keyframes fadeinout {
+            0% { opacity: 0; transform: translateY(10px); }
+            10% { opacity: 1; transform: translateY(0); }
+            80% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        
+        #game-over { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: red; text-align: center; flex-direction: column; justify-content: center; align-items: center; pointer-events: auto; z-index: 100;}
+        #game-over h1 { font-size: 60px; margin: 0; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="stats" class="panel">
+            <div class="stat-bar"><div id="health-fill" class="stat-fill"></div><span class="stat-label">ЗДОРОВЬЕ</span></div>
+            <div class="stat-bar"><div id="hunger-fill" class="stat-fill"></div><span class="stat-label">ГОЛОД</span></div>
+            <div class="stat-bar"><div id="energy-fill" class="stat-fill"></div><span class="stat-label">ЭНЕРГИЯ</span></div>
+            <div id="current-biome" style="margin-top:5px; font-size:14px; color:#aaa;">Биом: Загрузка...</div>
+        </div>
+
+        <div id="equip-slot" class="panel">
+            Оружие: <span id="equipped-weapon">Кулаки</span>
+            <div id="ammo-count" style="font-size: 12px; color: #aaa; margin-top: 2px;"></div>
+        </div>
+
+        <div id="inventory-panel" class="panel">
+            <h3 style="margin:0 0 10px 0; border-bottom: 1px solid #555;">Инвентарь</h3>
+            <div id="inventory-list"><i>Пусто</i></div>
+        </div>
+
+        <div id="crafting-panel" class="panel">
+            <h3 style="margin:0 0 10px 0; border-bottom: 1px solid #555;">Крафт</h3>
+            <div id="crafting-list"></div>
+        </div>
+
+        <div id="search-btn" onclick="searchLocation()">🔍</div>
+        <div id="message-log"></div>
+    </div>
+
+    <div id="game-over">
+        <h1>ВЫ ПОГИБЛИ</h1>
+        <p>Обновите страницу, чтобы попробовать снова.</p>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+    let camX = 0; let camY = 0;
+
+    const TILE_SIZE = 100;
+    const WORLD_SIZE = 10000;
+    const GRID_SIZE = WORLD_SIZE / TILE_SIZE;
+
+    const BIOMES = {
+        WASTELAND: { id: 0, name: 'Пустошь', color: '#8B7355' },
+        FOREST: { id: 1, name: 'Лес', color: '#2E4F2E' },
+        CITY: { id: 2, name: 'Город', color: '#555555' },
+        ROAD: { id: 3, name: 'Дорога', color: '#333333' }
+    };
+
+    let map = new Array(GRID_SIZE).fill(0).map(() => new Array(GRID_SIZE).fill(BIOMES.WASTELAND));
+    
+    function generateWorld() {
+        for (let i = 0; i < 15; i++) {
+            let cx = Math.floor(Math.random() * (GRID_SIZE - 10)) + 5;
+            let cy = Math.floor(Math.random() * (GRID_SIZE - 10)) + 5;
+            let radius = Math.floor(Math.random() * 4) + 2;
+            for(let y = -radius; y <= radius; y++) {
+                for(let x = -radius; x <= radius; x++) {
+                    if(cx+x > 0 && cx+x < GRID_SIZE && cy+y > 0 && cy+y < GRID_SIZE) { map[cx+x][cy+y] = BIOMES.CITY; }
+                }
+            }
+            if (Math.random() > 0.5) { for(let x = 0; x < GRID_SIZE; x++) map[x][cy] = BIOMES.ROAD; } 
+            else { for(let y = 0; y < GRID_SIZE; y++) map[cx][y] = BIOMES.ROAD; }
+        }
+        for (let i = 0; i < 30; i++) {
+            let fx = Math.floor(Math.random() * GRID_SIZE);
+            let fy = Math.floor(Math.random() * GRID_SIZE);
+            let radius = Math.floor(Math.random() * 6) + 3;
+            for(let y = -radius; y <= radius; y++) {
+                for(let x = -radius; x <= radius; x++) {
+                    if(fx+x > 0 && fx+x < GRID_SIZE && fy+y > 0 && fy+y < GRID_SIZE && map[fx+x][fy+y] == BIOMES.WASTELAND) {
+                        if(x*x + y*y <= radius*radius) map[fx+x][fy+y] = BIOMES.FOREST;
+                    }
+                }
+            }
+        }
+    }
+    generateWorld();
+
+    const player = {
+        x: WORLD_SIZE / 2, y: WORLD_SIZE / 2,
+        width: 30, height: 30, color: '#fff',
+        speed: 3, sprintMultiplier: 2.5,
+        health: 100, hunger: 100, energy: 100,
+        inventory: {},
+        equippedWeapon: null,
+        lastAttackTime: 0
+    };
+
+    const weapons = {
+        'кремневый нож': { type: 'melee', damage: 25, range: 60, cooldown: 500 },
+        'арбалет': { type: 'ranged', damage: 40, speed: 10, cooldown: 1000, ammo: ['отравленная стрела', 'стрела'] },
+        'пистолет': { type: 'ranged', damage: 60, speed: 15, cooldown: 400, ammo: ['патроны для пистолета'] }
+    };
+
+    let projectiles = [];
+    let particles = []; 
+
+    const keys = { w: false, a: false, s: false, d: false, shift: false };
+    let mouseX = 0, mouseY = 0;
+
+    window.addEventListener('keydown', e => { 
+        if(e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'ц') keys.w = true;
+        if(e.key.toLowerCase() === 'a' || e.key.toLowerCase() === 'ф') keys.a = true;
+        if(e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'ы') keys.s = true;
+        if(e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'в') keys.d = true;
+        if(e.key === 'Shift') keys.shift = true;
+    });
+    window.addEventListener('keyup', e => { 
+        if(e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'ц') keys.w = false;
+        if(e.key.toLowerCase() === 'a' || e.key.toLowerCase() === 'ф') keys.a = false;
+        if(e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'ы') keys.s = false;
+        if(e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'в') keys.d = false;
+        if(e.key === 'Shift') keys.shift = false;
+    });
+
+    canvas.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+
+    canvas.addEventListener('mousedown', e => {
+        if(e.button !== 0 || player.health <= 0) return; 
+        
+        const now = performance.now();
+        const weaponStats = player.equippedWeapon ? weapons[player.equippedWeapon] : { type: 'melee', damage: 5, range: 40, cooldown: 600 }; 
+
+        if (now - player.lastAttackTime < weaponStats.cooldown) return;
+
+        let targetWorldX = mouseX + camX;
+        let targetWorldY = mouseY + camY;
+        let angle = Math.atan2(targetWorldY - player.y, targetWorldX - player.x);
+
+        if (weaponStats.type === 'melee') {
+            player.lastAttackTime = now;
+            particles.push({ x: player.x + Math.cos(angle)*30, y: player.y + Math.sin(angle)*30, life: 10, color: '#fff', size: 10 });
+            
+            enemies.forEach(enemy => {
+                let dist = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+                let enemyAngle = Math.atan2(enemy.y - player.y, enemy.x - player.x);
+                let angleDiff = Math.abs(angle - enemyAngle);
+                if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+
+                if (dist <= weaponStats.range && angleDiff < Math.PI / 3) {
+                    damageEnemy(enemy, weaponStats.damage);
+                }
+            });
+        } 
+        else if (weaponStats.type === 'ranged') {
+            let ammoToUse = null;
+            for (let a of weaponStats.ammo) {
+                if (player.inventory[a] > 0) { ammoToUse = a; break; }
+            }
+
+            if (ammoToUse) {
+                player.lastAttackTime = now;
+                player.inventory[ammoToUse]--;
+                if (player.inventory[ammoToUse] <= 0) delete player.inventory[ammoToUse];
+                
+                let isPoisoned = ammoToUse === 'отравленная стрела';
+                let projColor = isPoisoned ? '#00FF00' : (weaponStats.speed > 10 ? '#FFD700' : '#FFF'); 
+                
+                projectiles.push({
+                    x: player.x, y: player.y,
+                    vx: Math.cos(angle) * weaponStats.speed,
+                    vy: Math.sin(angle) * weaponStats.speed,
+                    damage: weaponStats.damage + (isPoisoned ? 15 : 0), 
+                    color: projColor,
+                    life: 100,
+                    isEnemy: false // Это снаряд игрока
+                });
+                updateUI();
+            } else {
+                logMessage("Нет патронов!");
+            }
+        }
+    });
+
+    function damageEnemy(enemy, amount) {
+        enemy.hp -= amount;
+        particles.push({ x: enemy.x, y: enemy.y, life: 15, color: 'red', size: 5 });
+        
+        if (enemy.hp <= 0) {
+            if (enemy.type === 'Бандит') {
+                player.inventory['консервы'] = (player.inventory['консервы'] || 0) + 1;
+                player.inventory['бинт'] = (player.inventory['бинт'] || 0) + 1;
+                player.inventory['патроны для пистолета'] = (player.inventory['патроны для пистолета'] || 0) + 3;
+                logMessage("Бандит убит! Выпал лут.");
+            } else {
+                logMessage(`${enemy.type} убит!`);
+            }
+        }
+    }
+
+    const lootTables = {
+        'Лес': [
+            {item: 'земляника', chance: 0.3}, {item: 'подорожник', chance: 0.25}, 
+            {item: 'волчьи ягоды', chance: 0.25}, {item: 'деревянная палка', chance: 0.2}
+        ],
+        'Город': [
+            {item: 'деревянная палка', chance: 0.15}, {item: 'металлическая труба', chance: 0.15}, 
+            {item: 'веревка', chance: 0.1}, {item: 'консервы', chance: 0.15}, 
+            {item: 'аптечка', chance: 0.1}, {item: 'синяя изолента', chance: 0.15}, 
+            {item: 'ткань', chance: 0.1}, {item: 'инженерное руководство', chance: 0.05}, 
+            {item: 'руководство по токсичным веществам', chance: 0.05}
+        ],
+        'Пустошь': [{item: 'камень', chance: 0.8}, {item: 'ничего', chance: 0.2}],
+        'Дорога': [{item: 'подорожник', chance: 0.3}, {item: 'камень', chance: 0.5}, {item: 'ничего', chance: 0.2}]
+    };
+
+    const consumables = {
+        'земляника': { hunger: 15, energy: 20 },
+        'подорожник': { health: 10 },
+        'волчьи ягоды': { health: -15 }, 
+        'консервы': { hunger: 40 },
+        'аптечка': { health: 50 },
+        'бинт': { health: 30 }
+    };
+
+    const recipes = [
+        { name: 'кремневый нож', req: { 'камень': 1, 'деревянная палка': 1, 'синяя изолента': 1 }, needDoc: null },
+        { name: 'яд', req: { 'волчьи ягоды': 1 }, needDoc: null },
+        { name: 'стрела', req: { 'деревянная палка': 1, 'камень': 1 }, needDoc: null },
+        { name: 'арбалет', req: { 'деревянная палка': 2, 'металлическая труба': 1, 'веревка': 1, 'синяя изолента': 3 }, needDoc: null },
+        { name: 'отравленная стрела', req: { 'стрела': 1, 'яд': 1 }, needDoc: 'руководство по токсичным веществам' },
+        { name: 'пистолет', req: { 'металлическая труба': 3, 'деревянная палка': 5, 'синяя изолента': 5 }, needDoc: 'инженерное руководство' }
+    ];
+
+    let enemies = [];
+    function spawnEnemies() {
+        for(let i=0; i<150; i++) {
+            let ex = Math.random() * WORLD_SIZE;
+            let ey = Math.random() * WORLD_SIZE;
+            let typeInfo = getBiomeAt(ex, ey);
+            
+            if(typeInfo.name === 'Пустошь' || typeInfo.name === 'Город') {
+                enemies.push({ x: ex, y: ey, type: 'Дикая собака', hp: 30, maxHp: 30, speed: 2.5, color: '#C0A080' });
+            }
+            if(typeInfo.name === 'Город' && Math.random() > 0.5) {
+                enemies.push({ x: ex, y: ey, type: 'Бандит', hp: 80, maxHp: 80, speed: 1.5, color: '#FF4444', lastShot: 0 });
+            }
+            if(typeInfo.name === 'Лес') {
+                enemies.push({ x: ex, y: ey, type: 'Волк', hp: 50, maxHp: 50, speed: 2.8, color: '#888888' });
+            }
+        }
+    }
+    spawnEnemies();
+
+    function logMessage(msg) {
+        const log = document.getElementById('message-log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerText = msg;
+        log.appendChild(entry);
+        setTimeout(() => entry.remove(), 4000);
+    }
+
+    function getBiomeAt(x, y) {
+        let gx = Math.floor(x / TILE_SIZE);
+        let gy = Math.floor(y / TILE_SIZE);
+        if(gx < 0) gx = 0; if(gx >= GRID_SIZE) gx = GRID_SIZE - 1;
+        if(gy < 0) gy = 0; if(gy >= GRID_SIZE) gy = GRID_SIZE - 1;
+        return map[gx][gy];
+    }
+
+    function searchLocation() {
+        if (player.energy < 5) { logMessage("Недостаточно энергии!"); return; }
+        player.energy -= 5;
+        let biome = getBiomeAt(player.x, player.y).name;
+        let table = lootTables[biome];
+        let roll = Math.random();
+        let cumulative = 0;
+        let found = 'ничего';
+
+        for (let item of table) {
+            cumulative += item.chance;
+            if (roll <= cumulative) { found = item.item; break; }
+        }
+
+        if (found !== 'ничего') {
+            player.inventory[found] = (player.inventory[found] || 0) + 1;
+            logMessage(`Найдено: ${found}!`);
+        } else {
+            logMessage("Здесь нет ничего полезного.");
+        }
+        updateUI();
+    }
+
+    function useItem(itemName) {
+        let effect = consumables[itemName];
+        if (effect) {
+            player.inventory[itemName]--;
+            if (player.inventory[itemName] === 0) delete player.inventory[itemName];
+            
+            if(effect.health) player.health += effect.health;
+            if(effect.hunger) player.hunger += effect.hunger;
+            if(effect.energy) player.energy += effect.energy;
+            
+            if (effect.health < 0) logMessage(`Ой! Ядовито!`);
+            else logMessage(`Использовано: ${itemName}`);
+
+            player.health = Math.min(100, player.health);
+            player.hunger = Math.min(100, player.hunger);
+            player.energy = Math.min(100, player.energy);
+            updateUI();
+        }
+    }
+
+    function equipWeapon(itemName) {
+        if (player.equippedWeapon === itemName) {
+            player.equippedWeapon = null; 
+        } else {
+            player.equippedWeapon = itemName; 
+        }
+        updateUI();
+    }
+
+    function craftItem(index) {
+        let r = recipes[index];
+        for (let [item, amt] of Object.entries(r.req)) { player.inventory[item] -= amt; if (player.inventory[item] === 0) delete player.inventory[item]; }
+        player.inventory[r.name] = (player.inventory[r.name] || 0) + 1;
+        logMessage(`Создано: ${r.name}!`);
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById('health-fill').style.width = player.health + '%';
+        document.getElementById('hunger-fill').style.width = player.hunger + '%';
+        document.getElementById('energy-fill').style.width = player.energy + '%';
+        document.getElementById('current-biome').innerText = `Локация: ${getBiomeAt(player.x, player.y).name}`;
+
+        document.getElementById('equipped-weapon').innerText = player.equippedWeapon || 'Кулаки';
+        let ammoText = '';
+        if (player.equippedWeapon && weapons[player.equippedWeapon].type === 'ranged') {
+            let ammoTypes = weapons[player.equippedWeapon].ammo;
+            let totalAmmo = 0;
+            ammoTypes.forEach(a => totalAmmo += (player.inventory[a] || 0));
+            ammoText = `Патроны: ${totalAmmo}`;
+        }
+        document.getElementById('ammo-count').innerText = ammoText;
+
+        let invHTML = '';
+        if (Object.keys(player.inventory).length === 0) invHTML = '<i>Пусто</i>';
+        for (let [item, count] of Object.entries(player.inventory)) {
+            let btns = '';
+            if (consumables[item]) btns += `<button class="btn btn-small" onclick="useItem('${item}')">ИСПОЛЬЗОВАТЬ</button>`;
+            if (weapons[item]) {
+                let isEq = player.equippedWeapon === item;
+                btns += `<button class="btn btn-small" style="background:${isEq?'#4caf50':'#444'}" onclick="equipWeapon('${item}')">${isEq?'СНЯТЬ':'НАДЕТЬ'}</button>`;
+            }
+            invHTML += `<div style="margin-bottom:8px; clear:both; overflow:hidden;">${count}x ${item} ${btns}</div>`;
+        }
+        document.getElementById('inventory-list').innerHTML = invHTML;
+
+        let craftHTML = '';
+        recipes.forEach((r, idx) => {
+            let reqStr = Object.entries(r.req).map(([i, c]) => `${c} ${i}`).join(', ');
+            let hasReqs = true;
+            if (r.needDoc && !player.inventory[r.needDoc]) hasReqs = false;
+            for (let [i, c] of Object.entries(r.req)) { if ((player.inventory[i] || 0) < c) hasReqs = false; }
+            
+            craftHTML += `<button class="btn" ${hasReqs ? '' : 'disabled'} onclick="craftItem(${idx})">
+                <b>${r.name}</b><br><span style="font-size:10px;">Треб: ${reqStr} ${r.needDoc ? '(+ '+r.needDoc+')' : ''}</span>
+            </button>`;
+        });
+        document.getElementById('crafting-list').innerHTML = craftHTML;
+    }
+
+    let lastTime = performance.now();
+    let hungerTimer = 0;
+    
+    function gameLoop(time) {
+        let dt = (time - lastTime) / 1000;
+        lastTime = time;
+
+        if (player.health <= 0) {
+            document.getElementById('game-over').style.display = 'flex';
+            return;
+        }
+
+        let currentSpeed = player.speed;
+        let isRunning = keys.shift && player.energy > 0 && (keys.w || keys.a || keys.s || keys.d);
+        if (isRunning) {
+            currentSpeed *= player.sprintMultiplier;
+            player.energy -= 15 * dt; 
+        } else if (player.energy < 100) {
+            player.energy += 3 * dt;
+        }
+
+        if (keys.w && player.y > player.height/2) player.y -= currentSpeed;
+        if (keys.s && player.y < WORLD_SIZE - player.height/2) player.y += currentSpeed;
+        if (keys.a && player.x > player.width/2) player.x -= currentSpeed;
+        if (keys.d && player.x < WORLD_SIZE - player.width/2) player.x += currentSpeed;
+
+        hungerTimer += dt;
+        if (hungerTimer >= 2) {
+            hungerTimer = 0;
+            player.hunger -= 0.5;
+            if (player.hunger <= 0) { player.hunger = 0; player.health -= 2; logMessage("Вы умираете от голода!"); }
+            updateUI();
+        }
+
+        // ИСПРАВЛЕННАЯ ЛОГИКА СНАРЯДОВ
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life--;
+
+            let hit = false;
+            
+            if (p.isEnemy) {
+                // Проверяем попадание по игроку
+                if (Math.hypot(player.x - p.x, player.y - p.y) < player.width / 2) {
+                    player.health -= p.damage;
+                    particles.push({ x: player.x, y: player.y, life: 15, color: 'red', size: 5 });
+                    hit = true;
+                    updateUI();
+                }
+            } else {
+                // Проверяем попадание по врагам
+                for (let j = 0; j < enemies.length; j++) {
+                    let e = enemies[j];
+                    if (Math.hypot(e.x - p.x, e.y - p.y) < 20) {
+                        damageEnemy(e, p.damage);
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hit || p.life <= 0) projectiles.splice(i, 1);
+        }
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            let e = enemies[i];
+            if (e.hp <= 0) {
+                enemies.splice(i, 1);
+                continue;
+            }
+
+            let dx = player.x - e.x;
+            let dy = player.y - e.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < 500) { 
+                if (e.type === 'Бандит') {
+                    if (dist < 200) { 
+                        e.x -= (dx/dist) * e.speed;
+                        e.y -= (dy/dist) * e.speed;
+                    } else if (dist > 300) { 
+                        e.x += (dx/dist) * e.speed;
+                        e.y += (dy/dist) * e.speed;
+                    }
+                    
+                    if (time - e.lastShot > 1500 && dist < 400) {
+                        e.lastShot = time;
+                        let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.2; 
+                        projectiles.push({
+                            x: e.x, y: e.y,
+                            vx: Math.cos(angle) * 8, vy: Math.sin(angle) * 8,
+                            damage: 15, color: '#FFA500', life: 100, isEnemy: true // Метка вражеского снаряда
+                        });
+                    }
+                } else if (dist > 20) { 
+                    e.x += (dx/dist) * e.speed;
+                    e.y += (dy/dist) * e.speed;
+                } else if (dist <= 20) {
+                    player.health -= dt * 10; 
+                    updateUI();
+                }
+            }
+        }
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].life--;
+            if (particles[i].life <= 0) particles.splice(i, 1);
+        }
+
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function draw() {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        
+        camX = player.x - canvas.width / 2;
+        camY = player.y - canvas.height / 2;
+        
+        if(camX < 0) camX = 0;
+        if(camY < 0) camY = 0;
+        if(camX > WORLD_SIZE - canvas.width) camX = WORLD_SIZE - canvas.width;
+        if(camY > WORLD_SIZE - canvas.height) camY = WORLD_SIZE - canvas.height;
+
+        ctx.translate(-camX, -camY);
+
+        let startCol = Math.floor(camX / TILE_SIZE);
+        let endCol = startCol + (canvas.width / TILE_SIZE) + 1;
+        let startRow = Math.floor(camY / TILE_SIZE);
+        let endRow = startRow + (canvas.height / TILE_SIZE) + 1;
+
+        for (let x = startCol; x <= endCol; x++) {
+            for (let y = startRow; y <= endRow; y++) {
+                if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+                    ctx.fillStyle = map[x][y].color;
+                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE + 1, TILE_SIZE + 1);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+                    ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+            }
+        }
+
+        projectiles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = p.life / 15;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        });
+
+        enemies.forEach(e => {
+            if (e.x > camX - 50 && e.x < camX + canvas.width + 50 && e.y > camY - 50 && e.y < camY + canvas.height + 50) {
+                ctx.fillStyle = e.color;
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, 15, 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (e.hp < e.maxHp) {
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(e.x - 15, e.y - 25, 30, 4);
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fillRect(e.x - 15, e.y - 25, 30 * (e.hp / e.maxHp), 4);
+                }
+            }
+        });
+
+        ctx.translate(player.x, player.y);
+        let angle = Math.atan2((mouseY + camY) - player.y, (mouseX + camX) - player.x);
+        ctx.rotate(angle);
+        
+        ctx.fillStyle = player.color;
+        ctx.fillRect(-player.width/2, -player.height/2, player.width, player.height);
+        
+        if (player.equippedWeapon === 'кремневый нож') {
+            ctx.fillStyle = '#aaa'; ctx.fillRect(10, 5, 15, 5);
+        } else if (player.equippedWeapon === 'арбалет' || player.equippedWeapon === 'пистолет') {
+            ctx.fillStyle = '#555'; ctx.fillRect(10, 5, 20, 6);
+        }
+
+        ctx.restore();
+    }
+
+    updateUI();
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
